@@ -51,7 +51,7 @@ public:
         std::swap(ptr, other.ptr);
     }
 
-    operator bool() const {
+    explicit operator bool() noexcept const {
         return ptr != nullptr;
     }
 };

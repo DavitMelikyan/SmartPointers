@@ -1,26 +1,47 @@
 #include <iostream>
 
+template<typename T>
+class ControlBlock {
+public:
+    T* ptr;
+    size_t shared_count;
+    size_t weak_count;
+
+    ControlBlock(T* p) : ptr(p), shared_count(1), weak_count(0) {}
+
+    ~ControlBlock() {
+        ptr = nullptr;
+    }
+};
+
+
 template <typename T>
 class SharedPtr {
 private:
     T* ptr;
-    size_t* rcount;
+    ControlBlock<T>* cblock;
 public:
-    explicit SharedPtr(T* p = nullptr) : ptr{p}, rcount{p ? new size_t(1) : new size_t(0)} { }
-
-    SharedPtr(const SharedPtr& other) : ptr{other.ptr}, rcount{other.rcount} {
-        if (ptr) ++(*rcount);
+    explicit SharedPtr(T* p = nullptr) : ptr{p} {
+        if (ptr) {
+            cblock = new ControlBlock(p);
+        }
     }
 
-    SharedPtr(SharedPtr&& other) noexcept : ptr{other.ptr}, rcount{other.rcount} {
-        if (ptr) ++(*rcount);
+    SharedPtr(const SharedPtr& other) : ptr{other.ptr}, cblock{other.cblock} {
+        if (ptr) ++cblock->shared_count;
+    }
+
+    SharedPtr(SharedPtr&& other) noexcept : ptr{other.ptr}, cblock{other.cblock} {
+        if (ptr) ++cblock->shared_count;
         other.release();
     }
 
     template <typename U>
     SharedPtr(std::unique_ptr<U>&& other) {
         ptr = other.release();
-        rcount = new size_t(ptr ? 1 : 0);
+        if (ptr) {
+            cblock = new ControlBlock(ptr);
+        }
     }
 
     SharedPtr& operator=(const SharedPtr& other) {
@@ -29,8 +50,8 @@ public:
         }
         release();
         ptr = other.ptr;
-        rcount = other.rcount;
-        ++(*rcount);
+        cblock = other.cblock;
+        ++cblock->shared_count;
         return *this;
     }
 
@@ -40,9 +61,9 @@ public:
         }
         release();
         ptr = other.ptr;
-        rcount = other.rcount;
+        cblock = other.cblock;
         other.ptr = nullptr;
-        other.rcount = nullptr;
+        other.cblock = nullptr;
         return *this;
     }
 
@@ -53,12 +74,14 @@ public:
     void reset(T* new_data) {
         release();
         ptr = new_data;
-        rcount = new size_t(new_data ? 1 : 0);
+        if (ptr) {
+            cblock = new ControlBlock(ptr);
+        }
     }
 
     void swap(SharedPtr& other) noexcept {
         std::swap(ptr, other.ptr);
-        std::swap(rcount, other.rcount);
+        std::swap(cblock, other.cblock);
     }
 
     T& operator*() const { 
@@ -74,14 +97,14 @@ public:
     }
 
     int use_count() const { 
-        return *rcount; 
+        return cblock->shared_count; 
     }
 
     bool unique() const { 
         return use_count() == 1; 
     }
 
-    operator bool() const { 
+    explicit operator bool() const noexcept { 
         return ptr != nullptr; 
     }
 
@@ -91,13 +114,15 @@ public:
 private:
     void release() {
         if (ptr) {
-            if(--(*rcount) == 0) {
+            if(--(cblock->shared_count) == 0) {
                 delete ptr;
-                delete rcount;
+            }
+            if (cblock->weak_count == 0) {
+                delete cblock;
             }
         }
         ptr = nullptr;
-        rcount = nullptr;
+        cblock = nullptr;
     }
 };
 
